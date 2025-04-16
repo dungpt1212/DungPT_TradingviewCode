@@ -1,0 +1,397 @@
+//@version=5
+indicator(title="RSI Chân Kinh", shorttitle="RSI", overlay=false)
+//#region[FUNCTIONS]
+boxLoc(_loc) =>
+    loc = switch _loc
+        "Top-Left"      => position.top_left
+        "Top-Center"    => position.top_center
+        "Top-Right"     => position.top_right
+        "Middle-Left"   => position.middle_left
+        "Middle-Center" => position.middle_center
+        "Middle-Right"  => position.middle_right
+        "Bottom-Left"   => position.bottom_left
+        "Bottom-Center" => position.bottom_center
+        "Bottom-Right"  => position.bottom_right
+    loc
+
+_size(string _size, bool _l=false) =>
+    size = switch _size
+        "Tiny"   => not(_l) ? size.tiny   : size.tiny
+        "Small"  => not(_l) ? size.small  : size.small
+        "Normal" => not(_l) ? size.normal : size.normal
+        "Large"  => not(_l) ? size.large  : size.large
+        "Huge"   => not(_l) ? size.huge   : size.huge
+    size
+//#endregion
+
+
+
+// SYMBOL INFO
+_showInfo  =      input.bool(true,         title="Show?",        inline='s2.1',      group="Symbol Info")
+_color2    =     input.color(color.rgb(255, 255, 255, 20),    title='',             inline='s2.1',      group="Symbol Info")
+_bgcolor2  =     input.color(#d1d4dc00,    title='',             inline='s2.1',      group="Symbol Info")
+_showBrdr2 =      input.bool(false,        title="Hide Border?", inline='s2.1',      group="Symbol Info")
+_y2        =    input.string("Top",        title="",             inline='s2.2',      group="Symbol Info", options=["Top","Middle","Bottom"])
+_x2        =    input.string("Center",      title="",             inline='s2.2',      group="Symbol Info", options=["Left","Center","Right"])
+_size2     =    input.string("Normal",      title="",             inline='s2.2',      group="Symbol Info", options=["Tiny","Small","Normal","Large","Huge"])
+_showIsym  =      input.bool(false,         title="Symbol?",      inline='s2.3',      group="Symbol Info")
+_showItf   =      input.bool(true,         title="Timeframe?",   inline='s2.3',      group="Symbol Info")
+//#endregion
+
+
+//#region[LOGIC]
+infoLOC  = boxLoc(_y2+"-"+_x2)
+
+// SYMBOL INFO
+date     = str.tostring(dayofmonth(time_close)) + "/" + str.tostring(month(time_close)) + "/" + str.tostring(year(time_close))
+
+num_tf   = if timeframe.isminutes
+    if str.tonumber(timeframe.period) % 60 == 0
+        str.tostring(str.tonumber(timeframe.period)/60)
+    else 
+        timeframe.period
+else
+    timeframe.period
+
+text_tf  = if timeframe.isminutes
+    if str.tonumber(timeframe.period) % 60 == 0
+        "H"
+    else 
+        "m"
+else 
+    na +""
+
+tf = num_tf + text_tf
+//#endregion 
+
+// SYMBOL INFO
+if _showInfo
+    _info = table.new(infoLOC,1,4,frame_color=_color2,frame_width=_showBrdr2?0:1)
+    if _showIsym
+        table.cell(_info, 0, 1, syminfo.ticker, text_color=_color2, text_halign="center", text_size=_size(_size2, true), bgcolor=_bgcolor2)
+    if _showItf
+        table.cell(_info, 0, 2, tf,             text_color=_color2, text_halign="center", text_size=_size(_size2),       bgcolor=_bgcolor2)
+//#endregion
+// Function to calculate different moving averages
+ma(source, length, type) =>
+    switch type
+        "SMA" => ta.sma(source, length)
+        "Bollinger Bands" => ta.sma(source, length)
+        "EMA" => ta.ema(source, length)
+        "SMMA (RMA)" => ta.rma(source, length)
+        "WMA" => ta.wma(source, length)
+        "VWMA" => ta.vwma(source, length)
+
+// Inputs for RSI and MA settings
+inputgroup = "**********INPUTs**********"
+shtline = input.bool(defval = true, title = "Show Trend Lines", group=inputgroup)
+shbg = input.bool(defval = false, title = "Show StdDev Background", group=inputgroup)
+
+rsiLengthInput = input.int(14, minval=1, title="RSI Length", group="RSI Settings")
+rsiSourceInput = input.source(close, "Source", group="RSI Settings")
+showDivergence = input.bool(true, title="Show Divergence", group="RSI Settings", display=display.data_window)
+
+// Calculate RSI
+up = ta.rma(math.max(ta.change(rsiSourceInput), 0), rsiLengthInput)
+down = ta.rma(-math.min(ta.change(rsiSourceInput), 0), rsiLengthInput)
+rsi = down == 0 ? 100 : up == 0 ? 0 : 100 - (100 / (1 + up / down))
+
+// Calculate WMA(45) and EMA(9) based on RSI
+wma45 = ma(rsi, 45, "WMA")
+ema9 = ma(rsi, 9, "EMA")
+
+// Đầu vào
+i1 = input(defval = 20, title = "Chu kỳ EMA volume")
+i2 = input(defval = 26, title = "Chu kỳ highest/lowest volume")
+
+// Tính khối lượng mua và bán
+volumebuy = 0.5 * volume * ((close - open) / (high - low) + 1)
+volumesell = volume - volumebuy
+
+// Hàm tính Hvol (High Volume)
+Hvol(x) => ta.ema(volumebuy, x) - ta.ema(volumesell, x)
+
+colorwhite= #ffffff
+colorwhite1= #9598a1
+// Tính toán Hvol
+hivol_hvol = ta.highest(Hvol(i1), i2)
+lowvol_hvol = ta.lowest(Hvol(i1), i2)
+Hvobsbientren = math.avg(hivol_hvol, 0)
+Hvobsbienduoi = math.avg(lowvol_hvol, 0)
+Hvobs = Hvol(i1)
+// Điều kiện a và b từ indicator volume
+a = Hvobs > hivol_hvol[1] and Hvobs > Hvobsbientren
+b = Hvobs < lowvol_hvol[1] and Hvobs < Hvobsbienduoi
+// Đặt màu cho RSI theo điều kiện a hoặc b
+rsi_color = a ? colorwhite : b ? colorwhite : colorwhite
+// Điều kiện chạm EMA(9) hoặc WMA(45)
+crossEma9 = ta.crossover(rsi, ema9) or ta.crossunder(rsi, ema9)
+crossWma45 = ta.crossover(rsi, wma45) or ta.crossunder(rsi, wma45)
+
+// Hiển thị nhãn khi xảy ra điều kiện
+if crossEma9
+    label.new(bar_index, rsi, color=color.new(#4caf50, 0), style=label.style_xcross, textcolor=color.white, size = size.auto)
+
+if crossWma45
+    label.new(bar_index, rsi, color=color.new(#fca311, 0), style=label.style_xcross, textcolor=color.white,size = size.auto)
+
+// Tạo cảnh báo
+alertcondition(crossEma9, title="RSI ↔ EMA9", message="RSI vừa chạm EMA9!")
+alertcondition(crossWma45, title="RSI ↔ WMA45", message="RSI vừa chạm WMA45!")
+// Vẽ RSI với màu đã được xác định
+plot(rsi, title="RSI", color=rsi_color, linewidth=2)
+plot(wma45, "WMA(45)", color=#fca311, linewidth = 2)
+plot(ema9, "EMA(9)", color=#4caf50)
+
+
+
+// Plot horizontal lines for RSI levels
+rsiUpperBand5 = hline(66.67, "RSI Upper Band 2", color=#d008f8, linestyle = hline.style_dotted, linewidth = 1, display = display.none)
+rsiUpperBand4 = hline(90, "RSI Upper Band 2", color= colorwhite1, linestyle = hline.style_dotted, linewidth = 1, display = display.none)
+rsiUpperBand2 = hline(80, "RSI Upper Band 2", color= colorwhite1, linestyle = hline.style_dotted, linewidth = 1)
+rsiUpperBand = hline(70, "RSI Upper Band", color= #d1d4dc, linestyle = hline.style_solid, linewidth = 1)
+rsiUpperBand3 = hline(60, "RSI Upper Band 3", color= colorwhite1, linestyle = hline.style_dotted, linewidth = 1)
+midline = hline(50, "RSI Middle Band", color= colorwhite1, linestyle = hline.style_dotted, linewidth = 1)
+rsiLowerBand2 = hline(40, "RSI Lower Band 2", color= colorwhite1, linestyle = hline.style_dotted, linewidth = 1)
+rsiLowerBand = hline(30, "RSI Lower Band", color= #d1d4dc, linestyle = hline.style_solid, linewidth = 1)
+rsiLowerBand3 = hline(20, "RSI Lower Band 3", color= colorwhite1, linestyle = hline.style_dotted, linewidth = 1)
+rsiLowerBand4 = hline(10, "RSI Lower Band 3", color= colorwhite1, linestyle = hline.style_dotted, linewidth = 1, display = display.none)
+rsiLowerBand5 = hline(33.33, "RSI Lower Band 3", color=#d008f8, linestyle = hline.style_dotted, linewidth = 1, display = display.none)
+// Shade the region between oversold and overbought levels
+//fill(rsiLowerBand2, rsiLowerBand3, color=color.rgb(194, 87, 87, 80), title="RSI Background Fill Down")
+//fill(rsiUpperBand2, rsiUpperBand3, color=color.rgb(87, 194, 171, 80), title="RSI Background Fill Up")
+// Variables for levels and label properties
+extend_right = 3
+colorlight = #b2ebf2
+
+// Function to calculate rightward extension
+rightbar(bars) =>
+    bar_index + bars
+
+// Add dynamic horizontal lines and labels
+if barstate.islast
+    var oy_line = line.new(x1=bar_index, x2=rightbar(extend_right), y1=70, y2=70, color= #ffffff00, width=1, xloc=xloc.bar_index)
+    var oy_label = label.new(x=rightbar(extend_right), y=70, text="70", style=label.style_none, textcolor= colorlight, size=size.small, xloc=xloc.bar_index)
+    line.set_x1(oy_line, bar_index)
+    line.set_x2(oy_line, rightbar(extend_right))
+    line.set_y1(oy_line, 70)
+    line.set_y2(oy_line, 70)
+    label.set_x(oy_label, rightbar(extend_right))
+    label.set_y(oy_label, 70)    
+
+    var ob_line = line.new(x1=bar_index, x2=rightbar(extend_right), y1=60, y2=60, color= #ffffff00, width=1, xloc=xloc.bar_index)
+    var ob_label = label.new(x=rightbar(extend_right), y=60, text="60", style=label.style_none, textcolor= colorlight, size=size.small, xloc=xloc.bar_index)
+    line.set_x1(ob_line, bar_index)
+    line.set_x2(ob_line, rightbar(extend_right))
+    line.set_y1(ob_line, 60)
+    line.set_y2(ob_line, 60)
+    label.set_x(ob_label, rightbar(extend_right))
+    label.set_y(ob_label, 60)
+
+    var oz_line = line.new(x1=bar_index, x2=rightbar(extend_right), y1=50, y2=50, color= #ffffff00, width=1, xloc=xloc.bar_index)
+    var oz_label = label.new(x=rightbar(extend_right), y=50, text="50", style=label.style_none, textcolor= colorlight, size=size.small, xloc=xloc.bar_index)
+    line.set_x1(oz_line, bar_index)
+    line.set_x2(oz_line, rightbar(extend_right))
+    line.set_y1(oz_line, 50)
+    line.set_y2(oz_line, 50)
+    label.set_x(oz_label, rightbar(extend_right))
+    label.set_y(oz_label, 50)
+
+    var os_line = line.new(x1=bar_index, x2=rightbar(extend_right), y1= 40, y2= 40, color= #ffffff00, width=1, xloc=xloc.bar_index)
+    var os_label = label.new(x=rightbar(extend_right), y=40, text="40", style=label.style_none, textcolor= colorlight, size=size.small, xloc=xloc.bar_index)
+    line.set_x1(os_line, bar_index)
+    line.set_x2(os_line, rightbar(extend_right))
+    line.set_y1(os_line, 40)
+    line.set_y2(os_line, 40)
+    label.set_x(os_label, rightbar(extend_right))
+    label.set_y(os_label, 40)
+
+    var ox_line = line.new(x1=bar_index, x2=rightbar(extend_right), y1= 30, y2= 30, color= #ffffff00, width=1, xloc=xloc.bar_index)
+    var ox_label = label.new(x=rightbar(extend_right), y=30, text="30", style=label.style_none, textcolor=colorlight, size=size.small, xloc=xloc.bar_index)
+    line.set_x1(ox_line, bar_index)
+    line.set_x2(ox_line, rightbar(extend_right))
+    line.set_y1(ox_line, 30)
+    line.set_y2(ox_line, 30)
+    label.set_x(ox_label, rightbar(extend_right))
+    label.set_y(ox_label, 30)
+
+
+
+    
+
+// Divergence detection
+lookbackRight = 5
+lookbackLeft = 5
+rangeUpper = 60
+rangeLower = 5
+bearColor = #ff9800
+bullColor = #ff9800
+textColor = color.white
+noneColor = color.new(color.white, 100)
+
+plFound = na(ta.pivotlow(rsi, lookbackLeft, lookbackRight)) ? false : true
+phFound = na(ta.pivothigh(rsi, lookbackLeft, lookbackRight)) ? false : true
+_inRange(cond) =>
+	bars = ta.barssince(cond == true)
+	rangeLower <= bars and bars <= rangeUpper
+
+// Regular Bullish Divergence
+rsiHL = rsi[lookbackRight] > ta.valuewhen(plFound, rsi[lookbackRight], 1) and _inRange(plFound[1])
+priceLL = low[lookbackRight] < ta.valuewhen(plFound, low[lookbackRight], 1)
+bullCondAlert = priceLL and rsiHL and plFound
+bullCond = showDivergence and bullCondAlert
+plot(plFound ? rsi[lookbackRight] : na, offset=-lookbackRight, title="Regular Bullish", linewidth=1, color=(bullCond ? bullColor : noneColor), display=display.pane)
+
+
+
+// Regular Bearish Divergence
+rsiLH = rsi[lookbackRight] < ta.valuewhen(phFound, rsi[lookbackRight], 1) and _inRange(phFound[1])
+priceHH = high[lookbackRight] > ta.valuewhen(phFound, high[lookbackRight], 1)
+bearCondAlert = priceHH and rsiLH and phFound
+bearCond = showDivergence and bearCondAlert
+plot(phFound ? rsi[lookbackRight] : na, offset=-lookbackRight, title="Regular Bearish", linewidth=1, color=(bearCond ? bearColor : noneColor), display=display.pane)
+
+
+
+// Alerts for divergences
+alertcondition(bullCondAlert, title='Regular Bullish Divergence', message="Found a new Regular Bullish Divergence, `Pivot Lookback Right` number of bars to the left of the current bar.")
+alertcondition(bearCondAlert, title='Regular Bearish Divergence', message='Found a new Regular Bearish Divergence, `Pivot Lookback Right` number of bars to the left of the current bar.')
+
+
+//Đánh dấu trọng yếu
+
+gr = 'LENGTH LEFT / RIGHT'
+leftLenH = input.int(title='Pivot High', defval=2, minval=1, inline='Pivot High', group=gr)
+rightLenH = input.int(title='/', defval=4, minval=1, inline='Pivot High', group=gr)
+
+leftLenL = input.int(title='Pivot Low', defval=2, minval=1, inline='Pivot Low', group=gr)
+rightLenL = input.int(title='/', defval=4, minval=1, inline='Pivot Low', group=gr)
+
+bh = ta.pivothigh(rsi, leftLenH, rightLenH)
+bl = ta.pivotlow(rsi, leftLenL, rightLenL)
+
+drawLabel(_offset, _pivot, _style, _color, _condition) =>
+    if not na(_pivot) and _condition
+        label.new(bar_index[_offset], _pivot, "", style=_style, color=_color, textcolor=#13172281, size = size.auto)
+
+drawLabel(rightLenH, bh, label.style_circle, #f81111, rsi[rightLenH] >= 50)
+drawLabel(rightLenL, bl, label.style_circle, #f81111, rsi[rightLenL] <= 50)
+
+//Bảng Đa Khung
+// POSITION AND SIZE
+PosTable = input.string(defval="Top Right", title="Position", options=["Top Right", "Middle Right", "Bottom Right", "Top Center", "Middle Center", "Bottom Center", "Top Left", "Middle Left", "Bottom Left"], group="Table Location & Size", inline="1")
+SizTable = input.string(defval="Normal", title="Size", options=["Normal", "Small", "Tiny"], group="Table Location & Size", inline="1",tooltip = "Màu Cam ở Tab W45 là RSI ~ W45, Màu Cam ở RSI = có form action")
+
+Pos1Table = PosTable == "Top Right" ? position.top_right : PosTable == "Middle Right" ? position.middle_right : PosTable == "Bottom Right" ? position.bottom_right : PosTable == "Top Center" ? position.top_center : PosTable == "Middle Center" ? position.middle_center : PosTable == "Bottom Center" ? position.bottom_center : PosTable == "Top Left" ? position.top_left : PosTable == "Middle Left" ? position.middle_left : position.bottom_left
+Siz1Table = SizTable == "Normal" ? size.auto : SizTable == "Normal" ? size.normal : SizTable == "Small" ? size.small : size.tiny
+
+tbl = table.new(Pos1Table, 3, 8, frame_width=1, frame_color=#00000000, border_width=1, border_color=#2F4F4F00)
+
+// RSI CONFIGS
+
+oscRSI = ta.rsi(rsiSourceInput, rsiLengthInput)
+
+// TIMEFRAMES OPTIONS
+box01 = input.bool(true, "TF[01]", inline = "01", group="Select Timeframe")
+tf01  = input.timeframe("1", "",   inline = "01", group="Select Timeframe")
+
+box02 = input.bool(true, "TF[02]", inline = "02", group="Select Timeframe")
+tf02  = input.timeframe("5", "",   inline = "02", group="Select Timeframe")
+
+box03 = input.bool(true, "TF[03]", inline = "03", group="Select Timeframe")
+tf03  = input.timeframe("15", "",  inline = "03", group="Select Timeframe")
+
+box04 = input.bool(true, "TF[04]", inline = "01", group="Select Timeframe")
+tf04  = input.timeframe("60", "",  inline = "01", group="Select Timeframe")
+
+box05 = input.bool(true, "TF[05]", inline = "02", group="Select Timeframe")
+tf05  = input.timeframe("240", "", inline = "02", group="Select Timeframe")
+
+box06 = input.bool(true, "TF[06]", inline = "03", group="Select Timeframe")
+tf06  = input.timeframe("1D", "",  inline = "03", group="Select Timeframe")
+
+
+// DEFINITION OF VALUES
+symbol = ticker.modify(syminfo.tickerid, syminfo.session)
+tfArr  = array.new<string>(na)
+rsiArr = array.new<float>(na)
+wmaArr = array.new<float>(na)
+emaArr = array.new<float>(na)
+
+// DEFINITIONS OF RSI & WMA FUNCTIONS APPENDED IN THE TIMEFRAME OPTIONS
+rsiAndWmaFun(tf, flg) =>
+    [rsi, wma45] = request.security(symbol, tf, [oscRSI, wma45])
+
+    if flg and (barstate.isrealtime ? true : timeframe.in_seconds(timeframe.period) <= timeframe.in_seconds(tf))
+        array.push(tfArr, na(tf) ? timeframe.period : tf)
+        array.push(rsiArr, rsi)
+        array.push(wmaArr, wma45)
+        array.push(emaArr, ema9)
+
+rsiAndWmaFun(tf01, box01), rsiAndWmaFun(tf02, box02), rsiAndWmaFun(tf03, box03), rsiAndWmaFun(tf04, box04), rsiAndWmaFun(tf05, box05), rsiAndWmaFun(tf06, box06)
+
+// TABLE AND CELLS CONFIG
+// Post Timeframe in format 
+tfTxt(x)=>
+    out = x
+    if not str.contains(x, "S") and not str.contains(x, "M") and 
+       not str.contains(x, "W") and not str.contains(x, "D")
+        if str.tonumber(x)%60 == 0
+            out := str.tostring(str.tonumber(x)/60)+"H"
+        else 
+            out := x
+    out
+
+// Thêm biến màu mới
+color_nen = #787b8662
+
+// Trong phần tạo bảng, thay đổi logic như sau:
+if barstate.islast
+    table.clear(tbl, 0, 0, 2, 7)
+
+    // TITLES
+    table.cell(tbl, 0, 0, "", text_color= colorwhite1, text_size=Siz1Table, bgcolor=#00000000)
+    table.cell(tbl, 1, 0, "RSI", text_color= colorwhite1, text_size=Siz1Table, bgcolor=#00000000)
+    table.cell(tbl, 2, 0, "W45", text_color= colorwhite1, text_size=Siz1Table, bgcolor=#00000000)
+
+    j = 1
+    if array.size(rsiArr) > 0
+        for i = 0 to array.size(rsiArr) - 1
+            if not na(array.get(rsiArr, i))
+                TF_VALUE  = array.get(tfArr,i)
+                RSI_VALUE = array.get(rsiArr, i)
+                WMA_VALUE = array.get(wmaArr, i)
+                EMA_VALUE = array.get(emaArr, i)
+                //config colors in the the cells
+                cond1 = (array.get(rsiArr,i)) >= 65
+                cond2 = (array.get(rsiArr, i)) <= 35
+                cellRSI = cond1 ? #26a69950 : cond2 ? #f0535091 : not cond1 and not cond2 ? color_nen : color_nen
+                txtRSI  = cond1 ? #26a69a : cond2 ? #f05350 : not cond1 and not cond2 ? #000000 : na
+                cond3 = (array.get(wmaArr,i)) >= 60
+                cond4 = (array.get(wmaArr, i)) <= 40
+                cellWMA = cond3 ? #26a699a8 : cond4 ? #f0535091 : not cond1 and not cond2 ? color_nen : color_nen
+            
+
+                 /// Kiểm tra điều kiện RSI = WMA45
+                rsi_equals_wma = math.abs(RSI_VALUE - WMA_VALUE) < 2  // Sử dụng độ chính xác 0.1
+                // Điều kiện đổi màu cam cho RSI trong khoảng 32-34 và 66-68
+                condRSI_orange = RSI_VALUE > 50 and RSI_VALUE < EMA_VALUE and EMA_VALUE < WMA_VALUE or  RSI_VALUE < 50 and RSI_VALUE > EMA_VALUE and EMA_VALUE > WMA_VALUE
+                bgcolor_rsi_orange = condRSI_orange ? #ff9900d2 : color_nen //muốn đổi màu điều kiện thì thay color_nen = cellRSI
+
+                text_color = colorwhite
+                if tfTxt(TF_VALUE) == "5" and (minute(timenow) >= 10 and minute(timenow) <= 15 or minute(timenow) >= 25 and minute(timenow) <= 30 or minute(timenow) >= 40 and minute(timenow) <= 45 or minute(timenow) >= 55 and minute(timenow) <= 60)
+                    text_color := color.red
+                else if tfTxt(TF_VALUE) == "15" and minute(timenow) >= 45 and minute(timenow) <= 59
+                    text_color := color.red
+                else if tfTxt(TF_VALUE) == "1H" and (hour(timenow, "UTC+7") == 3 or hour(timenow, "UTC+7") == 7 or hour(timenow, "UTC+7") == 11 or hour(timenow, "UTC+7") == 15 or hour(timenow, "UTC+7") == 19 or hour(timenow, "UTC+7") == 23)
+                    text_color := color.red
+                else if tfTxt(TF_VALUE) == "4H" and hour(timenow, "UTC+7") >= 20 and hour(timenow, "UTC+7") <= 23
+                    text_color := color.red
+  // Đặt màu nền cho ô
+                bgcolor_value = rsi_equals_wma ? #ff9900d2 : color_nen //muốn đổi màu điều kiện thì thay color_nen = cellWMA
+                table.cell(tbl, 0, j, tfTxt(TF_VALUE), text_color=text_color, text_halign=text.align_left, text_size=Siz1Table, bgcolor= color_nen)
+                table.cell(tbl, 1, j, str.tostring(RSI_VALUE, "#.#"), text_color= colorwhite, text_halign=text.align_right, text_size=Siz1Table, bgcolor=bgcolor_rsi_orange)
+                table.cell(tbl, 2, j, str.tostring(WMA_VALUE, "#.#"), text_color= colorwhite, text_halign=text.align_right, text_size=Siz1Table, bgcolor=bgcolor_value)
+
+                j += 1
+

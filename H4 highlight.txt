@@ -1,0 +1,21 @@
+//@version=5
+indicator("Highlight Custom H4 Candle (2 Time Selections)", overlay=true)
+
+// Input từ người dùng
+user_hour_1 = input.int(21, "Giờ mở cửa 1 (UTC+X)", minval=0, maxval=23) // Giờ mở cửa đầu tiên
+user_hour_2 = input.int(20, "Giờ mở cửa 2 (UTC+X)", minval=0, maxval=23)  // Giờ mở cửa thứ hai
+user_timezone = input.int(7, "Múi giờ (UTC+X)", minval=-12, maxval=14)   // Múi giờ người dùng chọn
+candle_color = input.color(color.blue, "Chọn màu nến")                   // Màu tô nến
+
+// Xác định khung thời gian H4
+is_h4 = timeframe.period == "240"
+
+// Chuyển đổi giờ từ UTC sang múi giờ người dùng chọn
+bar_hour_utc = hour(time, "UTC") // Giờ UTC của nến
+bar_hour_user_timezone = (bar_hour_utc + user_timezone) % 24 // Chuyển sang múi giờ người dùng
+
+// Kiểm tra nếu nến H4 mở cửa vào giờ người dùng chọn
+highlight_candle = is_h4 and (bar_hour_user_timezone == user_hour_1 or bar_hour_user_timezone == user_hour_2)
+
+// Tô màu nến nếu thỏa điều kiện
+barcolor(highlight_candle ? candle_color : na)
